@@ -1,0 +1,17 @@
+import resolve from "@rollup/plugin-node-resolve";
+import typescript from "@rollup/plugin-typescript";
+import { terser } from "rollup-plugin-terser";
+
+export default {
+  input: "src/google-family-link-card.ts",
+  output: {
+    file: "dist/google-family-link-card.js",
+    format: "es",
+    sourcemap: false,
+  },
+  plugins: [
+    resolve(),
+    typescript(),
+    terser({ format: { comments: false } }),
+  ],
+};
