@@ -23,6 +23,8 @@ export interface Translations {
   min: string;
   of: string;
   schedules: string;
+  today: string;
+  with_limit: string;
   minutes_format: MinuteFormatter;
 }
 
@@ -50,6 +52,8 @@ export const TRANSLATIONS: Record<string, Translations> = {
     min: "min",
     of: "of",
     schedules: "Schedules",
+    today: "Today",
+    with_limit: "with time limit",
     minutes_format: (h, m) => (h > 0 ? `${h}h ${m}m` : `${m}m`),
   },
   de: {
@@ -75,6 +79,8 @@ export const TRANSLATIONS: Record<string, Translations> = {
     min: "Min",
     of: "von",
     schedules: "Zeitpläne",
+    today: "Heute",
+    with_limit: "mit Zeitlimit",
     minutes_format: (h, m) => (h > 0 ? `${h} Std ${m} Min` : `${m} Min`),
   },
 };
