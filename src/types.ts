@@ -6,6 +6,7 @@ export interface FamilyLinkCardConfig {
   max_apps?: number;
   show_schedules?: boolean;
   name?: string;
+  device_limits?: Record<string, string>;
 }
 
 export interface HassEntity {

@@ -33,6 +33,7 @@ class GoogleFamilyLinkCard extends HTMLElement {
       max_apps: Math.min(10, Math.max(1, config.max_apps ?? 5)),
       show_schedules: config.show_schedules !== false,
       name: config.name ?? "",
+      device_limits: config.device_limits ?? {},
     };
     this._render();
   }
@@ -117,9 +118,17 @@ class GoogleFamilyLinkCard extends HTMLElement {
 
     // Prefer attribute values (more accurate); fall back to calculated
     const usedMins   = (remainEnt?.attributes?.used_minutes   as number | undefined) ?? null;
-    const totalMins  = (remainEnt?.attributes?.total_allowed_minutes as number | undefined) ?? null;
     const limitEnabled = (remainEnt?.attributes?.daily_limit_enabled as boolean | undefined) ?? true;
     const remainMins = remainEnt ? parseFloat(remainEnt.state) : null;
+
+    // Use custom daily-limit entity if configured, otherwise read from screen_time_remaining attributes
+    const limitEntityId = (this._config!.device_limits as Record<string, string>)[device] as string | undefined;
+    let totalMins: number | null = (remainEnt?.attributes?.total_allowed_minutes as number | undefined) ?? null;
+    if (limitEntityId) {
+      const limitEnt = this._e(limitEntityId);
+      const v = limitEnt ? parseFloat(limitEnt.state) : NaN;
+      if (!isNaN(v) && v > 0) totalMins = v;
+    }
 
     // switch ON = device unlocked (bypass restrictions), OFF = locked
     const isLocked       = lockSw?.state === "off";

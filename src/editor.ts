@@ -87,6 +87,13 @@ export class GoogleFamilyLinkCardEditor extends HTMLElement {
     const selectedDevices = new Set(cfg?.devices ?? []);
     const noIntegration = !!this._hass && children.length === 0;
 
+    // For the limit-sensor section: use detected devices with fallback to toEditorName
+    const configuredDeviceList = (cfg?.devices ?? []).map((slug) => ({
+      slug,
+      name: devices.find((d) => d.slug === slug)?.name ?? toEditorName(slug),
+    }));
+    const currentLimits = cfg?.device_limits ?? {};
+
     this.shadowRoot.innerHTML = `
       <style>
         :host { display: block; }
@@ -202,6 +209,25 @@ export class GoogleFamilyLinkCardEditor extends HTMLElement {
             </span>`}
         ` : `<span class="no-child-hint">Select a child to configure devices.</span>`}
 
+        ${configuredDeviceList.length > 0 ? `
+          <div class="sec-title" style="margin-top:14px">
+            <ha-icon icon="mdi:timer-outline"></ha-icon>Daily Limit Sensors
+          </div>
+          <span class="hint" style="display:block;margin-bottom:8px">
+            Optionally assign a dedicated sensor entity for each device's daily time limit
+            (e.g. <code>sensor.pixel_7_daily_limit</code>). Leave blank to use the value
+            from the screen-time-remaining sensor attributes.
+          </span>
+          ${configuredDeviceList.map((d) => `
+            <div class="field-wrap">
+              <label class="field-label">${escE(d.name)}</label>
+              <input type="text" class="device-limit-input"
+                data-device="${escE(d.slug)}"
+                value="${escE((currentLimits as Record<string,string>)[d.slug] ?? "")}"
+                placeholder="e.g. sensor.${escE(d.slug)}_daily_limit" />
+            </div>`).join("")}
+        ` : ""}
+
         <hr class="divider" />
 
         <div class="sec-title"><ha-icon icon="mdi:tune"></ha-icon>Options</div>
@@ -246,12 +272,17 @@ export class GoogleFamilyLinkCardEditor extends HTMLElement {
       el.addEventListener("change", () => this._fireChange());
       if ((el as HTMLInputElement).type !== "checkbox") el.addEventListener("input", () => this._fireChange());
     });
+
+    root.querySelectorAll<HTMLInputElement>(".device-limit-input").forEach((input) => {
+      input.addEventListener("change", () => this._fireChange());
+      input.addEventListener("input", () => this._fireChange());
+    });
   }
 
   private _onChildChange(): void {
     if (!this._config) return;
     const childEl = this.shadowRoot!.getElementById("child") as HTMLSelectElement | HTMLInputElement;
-    this._config = { ...this._config, child: childEl.value.trim(), devices: [] };
+    this._config = { ...this._config, child: childEl.value.trim(), devices: [], device_limits: {} };
     this._render();
     this._fireChange();
   }
@@ -266,13 +297,21 @@ export class GoogleFamilyLinkCardEditor extends HTMLElement {
     const showApps      = (root.getElementById("show_apps")      as HTMLInputElement | null)?.checked ?? true;
     const showSchedules = (root.getElementById("show_schedules") as HTMLInputElement | null)?.checked ?? true;
 
+    const deviceLimits: Record<string, string> = {};
+    root.querySelectorAll<HTMLInputElement>(".device-limit-input").forEach((input) => {
+      const val = input.value.trim();
+      if (val) deviceLimits[input.dataset.device!] = val;
+    });
+
     const config: FamilyLinkCardConfig = {
       ...this._config, child, devices,
       max_apps: Math.min(10, Math.max(1, maxApps)),
       show_apps: showApps,
       show_schedules: showSchedules,
+      device_limits: deviceLimits,
     };
     if (name) config.name = name; else delete config.name;
+    if (Object.keys(deviceLimits).length === 0) delete config.device_limits;
     this.dispatchEvent(new CustomEvent("config-changed", { detail: { config }, bubbles: true, composed: true }));
   }
 }
