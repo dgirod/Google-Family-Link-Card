@@ -1,6 +1,6 @@
 {
   "name": "google-family-link-card",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "A Home Assistant Lovelace card for Google Family Link screen time",
   "keywords": ["home-assistant", "lovelace", "custom-card", "google-family-link"],
   "license": "MIT",
