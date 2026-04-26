@@ -3,7 +3,7 @@ import { getTranslations, type Translations } from "./translations";
 import { minutesToDisplay, formatTime, escapeHtml, slugToName } from "./utils";
 import { GoogleFamilyLinkCardEditor } from "./editor";
 
-const CARD_VERSION = "1.1.0";
+const CARD_VERSION = "1.2.0";
 
 class GoogleFamilyLinkCard extends HTMLElement {
   private _hass: HomeAssistant | null = null;
@@ -46,9 +46,32 @@ class GoogleFamilyLinkCard extends HTMLElement {
 
   // ── Entity helpers ──────────────────────────────────────────────────────────
 
-  /** Full entity-prefix for a device: "<child>_<device>" */
+  /**
+   * Resolve the full entity-ID prefix for child-level entities.
+   * The HAFamilyLink integration uses the pattern:
+   *   <child>_family_link_<child>_<suffix>
+   * This method detects that automatically and falls back to just <child> if not found.
+   */
+  private _childPrefix(): string {
+    const child = this._config!.child;
+    if (!this._hass) return child;
+
+    // Try the HAFamilyLink naming: <child>_family_link_<child>
+    const flKey = `sensor.${child}_family_link_${child}_daily_screen_time`;
+    if (this._hass.states[flKey]) {
+      return `${child}_family_link_${child}`;
+    }
+
+    // Fallback: original simple pattern
+    return child;
+  }
+
+  /**
+   * Device entity prefix — just the device slug.
+   * Device-level entities in HAFamilyLink do NOT carry a child prefix.
+   */
   private _dp(device: string): string {
-    return `${this._config!.child}_${device}`;
+    return device;
   }
 
   private _e(id: string): HassEntity | null {
@@ -62,11 +85,11 @@ class GoogleFamilyLinkCard extends HTMLElement {
   private _childName(): string {
     const cfg = this._config!;
     if (cfg.name) return cfg.name;
-    const c = cfg.child;
+    const cp = this._childPrefix();
     return (
-      (this._e(`sensor.${c}_daily_screen_time`)?.attributes?.child_name as string | undefined) ??
-      (this._e(`switch.${c}_bedtime`)?.attributes?.child_name as string | undefined) ??
-      slugToName(c)
+      (this._e(`sensor.${cp}_daily_screen_time`)?.attributes?.child_name as string | undefined) ??
+      (this._e(`switch.${cp}_bedtime`)?.attributes?.child_name as string | undefined) ??
+      slugToName(cfg.child)
     );
   }
 
@@ -74,18 +97,20 @@ class GoogleFamilyLinkCard extends HTMLElement {
 
   /** Total screen time today (aggregated across all devices by the integration) */
   private _usedToday(): number {
-    const e = this._e(`sensor.${this._config!.child}_daily_screen_time`);
+    const cp = this._childPrefix();
+    const e = this._e(`sensor.${cp}_daily_screen_time`);
     if (!e) return 0;
     const n = parseFloat(e.state);
     return isNaN(n) ? 0 : n;
   }
 
   /**
-   * App usage list from sensor.<child>_daily_screen_time.attributes.apps.
+   * App usage list from sensor.<childPrefix>_daily_screen_time.attributes.apps.
    * Already aggregated across all devices by the integration.
    */
   private _topApps(): AppData[] {
-    const e = this._e(`sensor.${this._config!.child}_daily_screen_time`);
+    const cp = this._childPrefix();
+    const e = this._e(`sensor.${cp}_daily_screen_time`);
     const raw = e?.attributes?.apps;
     if (!Array.isArray(raw)) return [];
 
@@ -104,13 +129,12 @@ class GoogleFamilyLinkCard extends HTMLElement {
 
   private _deviceCardHtml(device: string): string {
     const t   = this._t();
-    const dp  = this._dp(device);                  // "<child>_<device>"
-    const c   = this._config!.child;
+    const dp  = this._dp(device);                  // just the device slug
 
-    // Per-device entities — all prefixed with "<child>_<device>"
+    // Per-device entities — prefixed with device slug only
     const remainEnt  = this._e(`sensor.${dp}_screen_time_remaining`);
     const bedBin     = this._e(`binary_sensor.${dp}_bedtime_active`);
-    const schoolBin  = this._e(`binary_sensor.${dp}_schooltime_active`);
+    const schoolBin  = this._e(`binary_sensor.${dp}_school_time_active`);
     const limitReach = this._e(`binary_sensor.${dp}_daily_limit_reached`);
     const lockSw     = this._e(`switch.${dp}`);
     const bonusEnt   = this._e(`sensor.${dp}_active_bonus`);
@@ -148,7 +172,6 @@ class GoogleFamilyLinkCard extends HTMLElement {
     const barColor  = usedPct >= 100 ? "var(--error-color,#db4437)" :
                       usedPct >= 80  ? "var(--warning-color,#ff9800)" : "var(--primary-color)";
 
-    const devE = escapeHtml(device);
     const dpE  = escapeHtml(dp);
 
     return `
@@ -218,16 +241,16 @@ class GoogleFamilyLinkCard extends HTMLElement {
 
   private _schedulesHtml(): string {
     const t     = this._t();
-    const child = this._config!.child;
-    const childBedSw    = this._e(`switch.${child}_bedtime`);
-    const childSchoolSw = this._e(`switch.${child}_school_time`);
+    const cp    = this._childPrefix();
+    const childBedSw    = this._e(`switch.${cp}_bedtime`);
+    const childSchoolSw = this._e(`switch.${cp}_school_time`);
 
     let bedHtml = "", schoolHtml = "";
 
     for (const device of this._config!.devices) {
       const dp = this._dp(device);
       const bedBin    = this._e(`binary_sensor.${dp}_bedtime_active`);
-      const schoolBin = this._e(`binary_sensor.${dp}_schooltime_active`);
+      const schoolBin = this._e(`binary_sensor.${dp}_school_time_active`);
 
       if (!bedHtml && bedBin) {
         bedHtml = this._scheduleItemHtml(
@@ -239,9 +262,17 @@ class GoogleFamilyLinkCard extends HTMLElement {
         );
       }
       if (!schoolHtml && schoolBin) {
+        // school_time entities may not have start/end attributes
+        const hasSchedule = schoolBin.attributes.school_time_start || schoolBin.attributes.schooltime_start;
+        const startTime = schoolBin.attributes.school_time_start ?? schoolBin.attributes.schooltime_start;
+        const endTime   = schoolBin.attributes.school_time_end   ?? schoolBin.attributes.schooltime_end;
+        const timeRange = hasSchedule
+          ? `${t.from} ${formatTime(startTime)} ${t.to} ${formatTime(endTime)}`
+          : "";
+
         schoolHtml = this._scheduleItemHtml(
           "mdi:school", t.school_time,
-          `${t.from} ${formatTime(schoolBin.attributes.schooltime_start)} ${t.to} ${formatTime(schoolBin.attributes.schooltime_end)}`,
+          timeRange,
           schoolBin.state === "on",
           childSchoolSw?.state === "on" ?? false,
           childSchoolSw?.entity_id ?? "",
@@ -517,7 +548,8 @@ class GoogleFamilyLinkCard extends HTMLElement {
       btn.addEventListener("click", () => {
         const dp      = btn.dataset.dp!;
         const minutes = btn.dataset.minutes!;
-        this._hass?.callService("button", "press", { entity_id: `button.${dp}_bonus_${minutes}min` });
+        // HAFamilyLink button naming: button.<device>_<minutes>min (no "bonus_" prefix)
+        this._hass?.callService("button", "press", { entity_id: `button.${dp}_${minutes}min` });
       });
     });
 
