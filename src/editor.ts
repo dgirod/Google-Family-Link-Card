@@ -6,7 +6,7 @@ interface ChildOption {
 }
 
 interface DeviceOption {
-  slug: string;  // short slug (without child prefix)
+  slug: string;  // full device entity slug (e.g. "samsung_a528b" or "lenovo_tb_j606f_2")
   name: string;
 }
 
@@ -32,44 +32,88 @@ export class GoogleFamilyLinkCardEditor extends HTMLElement {
 
   // ── Auto-detection ──────────────────────────────────────────────────────────
 
-  /** Detect all children via sensor.<child>_daily_screen_time */
+  /**
+   * Detect all children via sensor.<child>_family_link_<child>_daily_screen_time
+   * or the legacy sensor.<child>_daily_screen_time pattern.
+   */
   private _detectChildren(): ChildOption[] {
     if (!this._hass) return [];
     const result: ChildOption[] = [];
     const seen = new Set<string>();
+
     for (const [eid, entity] of Object.entries(this._hass.states)) {
-      const m = eid.match(/^sensor\.(.+)_daily_screen_time$/);
-      if (!m || seen.has(m[1])) continue;
-      seen.add(m[1]);
-      result.push({
-        slug: m[1],
-        name: (entity.attributes.child_name as string | undefined) ?? toEditorName(m[1]),
-      });
+      if (!eid.startsWith("sensor.") || !eid.endsWith("_daily_screen_time")) continue;
+
+      // Try HAFamilyLink pattern: sensor.<child>_family_link_<child>_daily_screen_time
+      const flMatch = eid.match(/^sensor\.(.+?)_family_link_.+_daily_screen_time$/);
+      if (flMatch) {
+        const slug = flMatch[1];
+        if (seen.has(slug)) continue;
+        seen.add(slug);
+        result.push({
+          slug,
+          name: (entity.attributes.child_name as string | undefined) ?? toEditorName(slug),
+        });
+        continue;
+      }
+
+      // Legacy pattern: sensor.<child>_daily_screen_time
+      const legacyMatch = eid.match(/^sensor\.(.+)_daily_screen_time$/);
+      if (legacyMatch) {
+        const slug = legacyMatch[1];
+        if (seen.has(slug)) continue;
+        seen.add(slug);
+        result.push({
+          slug,
+          name: (entity.attributes.child_name as string | undefined) ?? toEditorName(slug),
+        });
+      }
     }
     return result.sort((a, b) => a.name.localeCompare(b.name));
   }
 
   /**
-   * Detect devices for a child by scanning sensor.<child>_<device>_screen_time_remaining.
-   * Returns only the short device slug (without child prefix).
+   * Detect devices for a child by scanning entities with a matching child_name attribute.
+   * Device entities in HAFamilyLink use just the device slug (no child prefix).
+   * We match devices by checking `child_name` on `*_screen_time_remaining` sensors.
    */
   private _detectDevices(childSlug: string): DeviceOption[] {
     if (!this._hass || !childSlug) return [];
-    const prefix = `sensor.${childSlug}_`;
-    const suffix = "_screen_time_remaining";
+
+    // First, resolve the child's display name from the daily_screen_time entity
+    let childName: string | null = null;
+    for (const [eid, entity] of Object.entries(this._hass.states)) {
+      if (eid.includes(childSlug) && eid.endsWith("_daily_screen_time")) {
+        childName = (entity.attributes.child_name as string | undefined) ?? null;
+        break;
+      }
+    }
+
+    // If we couldn't resolve child_name, fall back to attribute scanning with slug match
     const result: DeviceOption[] = [];
     const seen = new Set<string>();
 
     for (const [eid, entity] of Object.entries(this._hass.states)) {
-      if (!eid.startsWith(prefix) || !eid.endsWith(suffix)) continue;
-      // Extract short device slug: everything between child prefix and suffix
-      const devSlug = eid.slice(prefix.length, eid.length - suffix.length);
+      if (!eid.endsWith("_screen_time_remaining")) continue;
+
+      // Match by child_name attribute (primary method)
+      const entityChildName = entity.attributes.child_name as string | undefined;
+      if (!entityChildName) continue;
+
+      const matches = childName
+        ? entityChildName === childName
+        : entityChildName.toLowerCase().replace(/\s+/g, "_").includes(childSlug);
+
+      if (!matches) continue;
+
+      // Extract device slug: everything between "sensor." and "_screen_time_remaining"
+      const devSlug = eid.replace(/^sensor\./, "").replace(/_screen_time_remaining$/, "");
       if (!devSlug || seen.has(devSlug)) continue;
       seen.add(devSlug);
 
       const devName =
-        (this._hass.states[`switch.${childSlug}_${devSlug}`]?.attributes?.friendly_name as string | undefined) ??
-        (entity.attributes?.friendly_name as string | undefined) ??
+        (entity.attributes.device_name as string | undefined) ??
+        (this._hass.states[`switch.${devSlug}`]?.attributes?.friendly_name as string | undefined) ??
         toEditorName(devSlug);
       result.push({ slug: devSlug, name: devName });
     }
