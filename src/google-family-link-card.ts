@@ -1,9 +1,9 @@
 import type { FamilyLinkCardConfig, HomeAssistant, HassEntity, AppData } from "./types";
 import { getTranslations, type Translations } from "./translations";
-import { minutesToDisplay, formatTime, escapeHtml, slugToName } from "./utils";
+import { minutesToDisplay, formatTime, escapeHtml, slugToName, packageToMdiIcon } from "./utils";
 import { GoogleFamilyLinkCardEditor } from "./editor";
 
-const CARD_VERSION = "1.2.0";
+const CARD_VERSION = "1.3.0";
 
 class GoogleFamilyLinkCard extends HTMLElement {
   private _hass: HomeAssistant | null = null;
@@ -412,9 +412,10 @@ class GoogleFamilyLinkCard extends HTMLElement {
 
       /* App usage */
       .app-item { display: flex; align-items: center; gap: 10px; padding: 4px 0; }
+      .app-icon { --mdc-icon-size: 20px; flex-shrink: 0; color: var(--secondary-text-color); }
       .app-name {
         font-size: 13px; color: var(--primary-text-color);
-        width: 130px; flex-shrink: 0;
+        width: 110px; flex-shrink: 0;
         overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
       }
       .app-bar {
@@ -487,6 +488,7 @@ class GoogleFamilyLinkCard extends HTMLElement {
         ${this._appsOpen ? `<div>
           ${apps.map((a) => `
             <div class="app-item">
+              <ha-icon icon="${packageToMdiIcon(a.package)}" class="app-icon"></ha-icon>
               <span class="app-name">${escapeHtml(a.name)}</span>
               <div class="app-bar">
                 <div class="app-fill" style="width:${((a.minutes / maxMins) * 100).toFixed(1)}%"></div>
