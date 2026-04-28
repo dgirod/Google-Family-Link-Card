@@ -1,0 +1,51 @@
+name: Auto Release
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'hacs.json'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Get version from hacs.json
+        id: version
+        run: |
+          VERSION=$(jq -r '.version' hacs.json)
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "tag=v$VERSION" >> $GITHUB_OUTPUT
+
+      - name: Check if tag exists
+        id: check_tag
+        run: |
+          if git rev-parse "v${{ steps.version.outputs.version }}" >/dev/null 2>&1; then
+            echo "exists=true" >> $GITHUB_OUTPUT
+          else
+            echo "exists=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Wait for dist build
+        if: steps.check_tag.outputs.exists == 'false'
+        run: sleep 30
+
+      - name: Pull latest (including dist build)
+        if: steps.check_tag.outputs.exists == 'false'
+        run: git pull origin main
+
+      - name: Create tag and release
+        if: steps.check_tag.outputs.exists == 'false'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: ${{ steps.version.outputs.tag }}
+          files: dist/google-family-link-card.js
+          generate_release_notes: true
