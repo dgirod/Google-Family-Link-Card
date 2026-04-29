@@ -1,9 +1,9 @@
 import type { FamilyLinkCardConfig, HomeAssistant, HassEntity, AppData } from "./types";
 import { getTranslations, type Translations } from "./translations";
-import { minutesToDisplay, formatTime, escapeHtml, slugToName } from "./utils";
+import { minutesToDisplay, formatTime, escapeHtml, slugToName, packageToMdiIcon } from "./utils";
 import { GoogleFamilyLinkCardEditor } from "./editor";
 
-const CARD_VERSION = "1.2.0";
+const CARD_VERSION = "1.3.0";
 
 class GoogleFamilyLinkCard extends HTMLElement {
   private _hass: HomeAssistant | null = null;
@@ -44,32 +44,18 @@ class GoogleFamilyLinkCard extends HTMLElement {
 
   getCardSize(): number { return 5; }
 
-  // ── Entity helpers ──────────────────────────────────────────────────────────
+  // ── Entity helpers ──────────────────────────────────────────────────────────────────────────
 
-  /**
-   * Resolve the full entity-ID prefix for child-level entities.
-   * The HAFamilyLink integration uses the pattern:
-   *   <child>_family_link_<child>_<suffix>
-   * This method detects that automatically and falls back to just <child> if not found.
-   */
   private _childPrefix(): string {
     const child = this._config!.child;
     if (!this._hass) return child;
-
-    // Try the HAFamilyLink naming: <child>_family_link_<child>
     const flKey = `sensor.${child}_family_link_${child}_daily_screen_time`;
     if (this._hass.states[flKey]) {
       return `${child}_family_link_${child}`;
     }
-
-    // Fallback: original simple pattern
     return child;
   }
 
-  /**
-   * Device entity prefix — just the device slug.
-   * Device-level entities in HAFamilyLink do NOT carry a child prefix.
-   */
   private _dp(device: string): string {
     return device;
   }
@@ -93,9 +79,8 @@ class GoogleFamilyLinkCard extends HTMLElement {
     );
   }
 
-  // ── Data extraction ─────────────────────────────────────────────────────────
+  // ── Data extraction ───────────────────────────────────────────────────────────────────────
 
-  /** Total screen time today (aggregated across all devices by the integration) */
   private _usedToday(): number {
     const cp = this._childPrefix();
     const e = this._e(`sensor.${cp}_daily_screen_time`);
@@ -104,10 +89,6 @@ class GoogleFamilyLinkCard extends HTMLElement {
     return isNaN(n) ? 0 : n;
   }
 
-  /**
-   * App usage list from sensor.<childPrefix>_daily_screen_time.attributes.apps.
-   * Already aggregated across all devices by the integration.
-   */
   private _topApps(): AppData[] {
     const cp = this._childPrefix();
     const e = this._e(`sensor.${cp}_daily_screen_time`);
@@ -125,13 +106,12 @@ class GoogleFamilyLinkCard extends HTMLElement {
       }));
   }
 
-  // ── HTML builders ───────────────────────────────────────────────────────────
+  // ── HTML builders ─────────────────────────────────────────────────────────────────────────
 
   private _deviceCardHtml(device: string): string {
     const t   = this._t();
-    const dp  = this._dp(device);                  // just the device slug
+    const dp  = this._dp(device);
 
-    // Per-device entities — prefixed with device slug only
     const remainEnt  = this._e(`sensor.${dp}_screen_time_remaining`);
     const bedBin     = this._e(`binary_sensor.${dp}_bedtime_active`);
     const schoolBin  = this._e(`binary_sensor.${dp}_school_time_active`);
@@ -139,13 +119,11 @@ class GoogleFamilyLinkCard extends HTMLElement {
     const lockSw     = this._e(`switch.${dp}`);
     const bonusEnt   = this._e(`sensor.${dp}_active_bonus`);
 
-    // Prefer attribute values (more accurate); fall back to calculated
     const usedMins   = (remainEnt?.attributes?.used_minutes   as number | undefined) ?? null;
     const totalMins  = (remainEnt?.attributes?.total_allowed_minutes as number | undefined) ?? null;
     const limitEnabled = (remainEnt?.attributes?.daily_limit_enabled as boolean | undefined) ?? true;
     const remainMins = remainEnt ? parseFloat(remainEnt.state) : null;
 
-    // switch ON = device unlocked (bypass restrictions), OFF = locked
     const isLocked       = lockSw?.state === "off";
     const isBedtime      = bedBin?.state   === "on";
     const isSchool       = schoolBin?.state === "on";
@@ -262,7 +240,6 @@ class GoogleFamilyLinkCard extends HTMLElement {
         );
       }
       if (!schoolHtml && schoolBin) {
-        // school_time entities may not have start/end attributes
         const hasSchedule = schoolBin.attributes.school_time_start || schoolBin.attributes.schooltime_start;
         const startTime = schoolBin.attributes.school_time_start ?? schoolBin.attributes.schooltime_start;
         const endTime   = schoolBin.attributes.school_time_end   ?? schoolBin.attributes.schooltime_end;
@@ -281,7 +258,6 @@ class GoogleFamilyLinkCard extends HTMLElement {
       if (bedHtml && schoolHtml) break;
     }
 
-    // Fallback: child-level switches only (no time details)
     if (!bedHtml && childBedSw) {
       bedHtml = this._scheduleItemHtml(
         "mdi:sleep", t.bedtime, "", false,
@@ -297,7 +273,7 @@ class GoogleFamilyLinkCard extends HTMLElement {
     return bedHtml + schoolHtml;
   }
 
-  // ── Styles ──────────────────────────────────────────────────────────────────
+  // ── Styles ──────────────────────────────────────────────────────────────────────────────
 
   private _styles(): string {
     return `
@@ -314,7 +290,7 @@ class GoogleFamilyLinkCard extends HTMLElement {
       .child-name { font-size: 20px; font-weight: 500; color: var(--primary-text-color); flex: 1; }
       .header-icon { color: var(--secondary-text-color); opacity: .6; }
 
-      /* Screen-time total — no progress ring */
+      /* Screen-time total */
       .st-section { display: flex; align-items: center; gap: 16px; padding: 14px 16px 16px; }
       .time-bubble {
         width: 96px; height: 96px; border-radius: 50%; flex-shrink: 0;
@@ -412,9 +388,10 @@ class GoogleFamilyLinkCard extends HTMLElement {
 
       /* App usage */
       .app-item { display: flex; align-items: center; gap: 10px; padding: 4px 0; }
+      .app-icon { --mdc-icon-size: 20px; flex-shrink: 0; color: var(--secondary-text-color); }
       .app-name {
         font-size: 13px; color: var(--primary-text-color);
-        width: 130px; flex-shrink: 0;
+        width: 110px; flex-shrink: 0;
         overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
       }
       .app-bar {
@@ -449,7 +426,7 @@ class GoogleFamilyLinkCard extends HTMLElement {
     `;
   }
 
-  // ── Main render ─────────────────────────────────────────────────────────────
+  // ── Main render ───────────────────────────────────────────────────────────────────────────
 
   private _render(): void {
     if (!this._config || !this.shadowRoot) return;
@@ -462,7 +439,6 @@ class GoogleFamilyLinkCard extends HTMLElement {
     const apps     = this._topApps();
     const maxMins  = apps.length > 0 ? Math.max(...apps.map((a) => a.minutes)) : 1;
 
-    // Count devices with an active daily limit for the subtitle
     const limitedDevices = cfg.devices.filter((d) => {
       const e = this._e(`sensor.${this._dp(d)}_screen_time_remaining`);
       return e?.attributes?.daily_limit_enabled !== false && parseFloat(e?.attributes?.total_allowed_minutes as string) > 0;
@@ -487,6 +463,7 @@ class GoogleFamilyLinkCard extends HTMLElement {
         ${this._appsOpen ? `<div>
           ${apps.map((a) => `
             <div class="app-item">
+              <ha-icon icon="${packageToMdiIcon(a.package)}" class="app-icon"></ha-icon>
               <span class="app-name">${escapeHtml(a.name)}</span>
               <div class="app-bar">
                 <div class="app-fill" style="width:${((a.minutes / maxMins) * 100).toFixed(1)}%"></div>
@@ -548,7 +525,6 @@ class GoogleFamilyLinkCard extends HTMLElement {
       btn.addEventListener("click", () => {
         const dp      = btn.dataset.dp!;
         const minutes = btn.dataset.minutes!;
-        // HAFamilyLink button naming: button.<device>_<minutes>min (no "bonus_" prefix)
         this._hass?.callService("button", "press", { entity_id: `button.${dp}_${minutes}min` });
       });
     });
