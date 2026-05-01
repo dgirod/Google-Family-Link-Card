@@ -3,7 +3,7 @@ import { getTranslations, type Translations } from "./translations";
 import { minutesToDisplay, formatTime, escapeHtml, slugToName, packageToMdiIcon } from "./utils";
 import { GoogleFamilyLinkCardEditor } from "./editor";
 
-const CARD_VERSION = "1.3.0";
+const CARD_VERSION = "1.3.1";
 
 class GoogleFamilyLinkCard extends HTMLElement {
   private _hass: HomeAssistant | null = null;
