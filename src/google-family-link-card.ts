@@ -3,7 +3,7 @@ import { getTranslations, type Translations } from "./translations";
 import { minutesToDisplay, formatTime, escapeHtml, slugToName, packageToMdiIcon } from "./utils";
 import { GoogleFamilyLinkCardEditor } from "./editor";
 
-const CARD_VERSION = "1.3.0";
+const CARD_VERSION = "1.3.1";
 
 class GoogleFamilyLinkCard extends HTMLElement {
   private _hass: HomeAssistant | null = null;
@@ -44,16 +44,32 @@ class GoogleFamilyLinkCard extends HTMLElement {
 
   getCardSize(): number { return 5; }
 
+  // ── Entity helpers ──────────────────────────────────────────────────────────
+
+  /**
+   * Resolve the full entity-ID prefix for child-level entities.
+   * The HAFamilyLink integration uses the pattern:
+   *   <child>_family_link_<child>_<suffix>
+   * This method detects that automatically and falls back to just <child> if not found.
+   */
   private _childPrefix(): string {
     const child = this._config!.child;
     if (!this._hass) return child;
+
+    // Try the HAFamilyLink naming: <child>_family_link_<child>
     const flKey = `sensor.${child}_family_link_${child}_daily_screen_time`;
     if (this._hass.states[flKey]) {
       return `${child}_family_link_${child}`;
     }
+
+    // Fallback: original simple pattern
     return child;
   }
 
+  /**
+   * Device entity prefix — just the device slug.
+   * Device-level entities in HAFamilyLink do NOT carry a child prefix.
+   */
   private _dp(device: string): string {
     return device;
   }
@@ -77,6 +93,9 @@ class GoogleFamilyLinkCard extends HTMLElement {
     );
   }
 
+  // ── Data extraction ─────────────────────────────────────────────────────────
+
+  /** Total screen time today (aggregated across all devices by the integration) */
   private _usedToday(): number {
     const cp = this._childPrefix();
     const e = this._e(`sensor.${cp}_daily_screen_time`);
@@ -85,6 +104,10 @@ class GoogleFamilyLinkCard extends HTMLElement {
     return isNaN(n) ? 0 : n;
   }
 
+  /**
+   * App usage list from sensor.<childPrefix>_daily_screen_time.attributes.apps.
+   * Already aggregated across all devices by the integration.
+   */
   private _topApps(): AppData[] {
     const cp = this._childPrefix();
     const e = this._e(`sensor.${cp}_daily_screen_time`);
@@ -102,9 +125,13 @@ class GoogleFamilyLinkCard extends HTMLElement {
       }));
   }
 
+  // ── HTML builders ───────────────────────────────────────────────────────────
+
   private _deviceCardHtml(device: string): string {
     const t   = this._t();
-    const dp  = this._dp(device);
+    const dp  = this._dp(device);                  // just the device slug
+
+    // Per-device entities — prefixed with device slug only
     const remainEnt  = this._e(`sensor.${dp}_screen_time_remaining`);
     const bedBin     = this._e(`binary_sensor.${dp}_bedtime_active`);
     const schoolBin  = this._e(`binary_sensor.${dp}_school_time_active`);
@@ -112,11 +139,13 @@ class GoogleFamilyLinkCard extends HTMLElement {
     const lockSw     = this._e(`switch.${dp}`);
     const bonusEnt   = this._e(`sensor.${dp}_active_bonus`);
 
+    // Prefer attribute values (more accurate); fall back to calculated
     const usedMins   = (remainEnt?.attributes?.used_minutes   as number | undefined) ?? null;
     const totalMins  = (remainEnt?.attributes?.total_allowed_minutes as number | undefined) ?? null;
     const limitEnabled = (remainEnt?.attributes?.daily_limit_enabled as boolean | undefined) ?? true;
     const remainMins = remainEnt ? parseFloat(remainEnt.state) : null;
 
+    // switch ON = device unlocked (bypass restrictions), OFF = locked
     const isLocked       = lockSw?.state === "off";
     const isBedtime      = bedBin?.state   === "on";
     const isSchool       = schoolBin?.state === "on";
@@ -142,6 +171,7 @@ class GoogleFamilyLinkCard extends HTMLElement {
     const usedPct   = showBar ? Math.min(100, ((usedMins as number) / totalMins!) * 100) : 0;
     const barColor  = usedPct >= 100 ? "var(--error-color,#db4437)" :
                       usedPct >= 80  ? "var(--warning-color,#ff9800)" : "var(--primary-color)";
+
     const dpE  = escapeHtml(dp);
 
     return `
@@ -232,12 +262,14 @@ class GoogleFamilyLinkCard extends HTMLElement {
         );
       }
       if (!schoolHtml && schoolBin) {
+        // school_time entities may not have start/end attributes
         const hasSchedule = schoolBin.attributes.school_time_start || schoolBin.attributes.schooltime_start;
         const startTime = schoolBin.attributes.school_time_start ?? schoolBin.attributes.schooltime_start;
         const endTime   = schoolBin.attributes.school_time_end   ?? schoolBin.attributes.schooltime_end;
         const timeRange = hasSchedule
           ? `${t.from} ${formatTime(startTime)} ${t.to} ${formatTime(endTime)}`
           : "";
+
         schoolHtml = this._scheduleItemHtml(
           "mdi:school", t.school_time,
           timeRange,
@@ -249,6 +281,7 @@ class GoogleFamilyLinkCard extends HTMLElement {
       if (bedHtml && schoolHtml) break;
     }
 
+    // Fallback: child-level switches only (no time details)
     if (!bedHtml && childBedSw) {
       bedHtml = this._scheduleItemHtml(
         "mdi:sleep", t.bedtime, "", false,
@@ -264,10 +297,14 @@ class GoogleFamilyLinkCard extends HTMLElement {
     return bedHtml + schoolHtml;
   }
 
+  // ── Styles ──────────────────────────────────────────────────────────────────
+
   private _styles(): string {
     return `
       :host { display: block; }
       ha-card { overflow: hidden; }
+
+      /* Header */
       .card-header { display: flex; align-items: center; gap: 12px; padding: 16px 16px 0; }
       .avatar {
         width: 42px; height: 42px; border-radius: 50%; background: var(--primary-color);
@@ -276,6 +313,8 @@ class GoogleFamilyLinkCard extends HTMLElement {
       }
       .child-name { font-size: 20px; font-weight: 500; color: var(--primary-text-color); flex: 1; }
       .header-icon { color: var(--secondary-text-color); opacity: .6; }
+
+      /* Screen-time total — no progress ring */
       .st-section { display: flex; align-items: center; gap: 16px; padding: 14px 16px 16px; }
       .time-bubble {
         width: 96px; height: 96px; border-radius: 50%; flex-shrink: 0;
@@ -284,55 +323,113 @@ class GoogleFamilyLinkCard extends HTMLElement {
         display: flex; flex-direction: column; align-items: center; justify-content: center;
         gap: 1px;
       }
-      .bubble-time { font-size: 18px; font-weight: 700; line-height: 1.1; color: var(--primary-text-color); }
-      .bubble-lbl { font-size: 9px; text-transform: uppercase; letter-spacing: .5px; color: var(--secondary-text-color); }
+      .bubble-time {
+        font-size: 18px; font-weight: 700; line-height: 1.1;
+        color: var(--primary-text-color);
+      }
+      .bubble-lbl {
+        font-size: 9px; text-transform: uppercase; letter-spacing: .5px;
+        color: var(--secondary-text-color);
+      }
       .st-meta { flex: 1; }
-      .st-title { font-size: 13px; font-weight: 600; color: var(--primary-text-color); margin-bottom: 6px; }
+      .st-title {
+        font-size: 13px; font-weight: 600; color: var(--primary-text-color);
+        margin-bottom: 6px;
+      }
       .st-subtitle { font-size: 12px; color: var(--secondary-text-color); }
+
+      /* Section */
       .section { border-top: 1px solid var(--divider-color, rgba(0,0,0,.1)); padding: 10px 16px 12px; }
       .section-head { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
       .section-head.toggleable { cursor: pointer; user-select: none; }
-      .section-title { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .6px; color: var(--secondary-text-color); flex: 1; }
+      .section-title {
+        font-size: 11px; font-weight: 600; text-transform: uppercase;
+        letter-spacing: .6px; color: var(--secondary-text-color); flex: 1;
+      }
       .chevron { color: var(--secondary-text-color); transition: transform .2s; }
       .chevron.open { transform: rotate(180deg); }
-      .device-card { background: var(--secondary-background-color, rgba(0,0,0,.04)); border-radius: 10px; padding: 10px 12px; margin-bottom: 8px; }
+
+      /* Device card */
+      .device-card {
+        background: var(--secondary-background-color, rgba(0,0,0,.04));
+        border-radius: 10px; padding: 10px 12px; margin-bottom: 8px;
+      }
       .device-card:last-child { margin-bottom: 0; }
       .device-header { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
       .device-icon { color: var(--secondary-text-color); --mdc-icon-size: 20px; }
       .device-name { font-size: 14px; font-weight: 500; color: var(--primary-text-color); flex: 1; }
-      .icon-btn { background: none; border: none; padding: 4px; cursor: pointer; border-radius: 4px; color: var(--secondary-text-color); display: flex; align-items: center; --mdc-icon-size: 20px; transition: background .15s; }
+      .icon-btn {
+        background: none; border: none; padding: 4px; cursor: pointer;
+        border-radius: 4px; color: var(--secondary-text-color);
+        display: flex; align-items: center; --mdc-icon-size: 20px; transition: background .15s;
+      }
       .icon-btn:hover { background: var(--divider-color, rgba(0,0,0,.1)); }
       .icon-btn.locked { color: var(--error-color, #db4437); }
+
+      /* Badges */
       .badge-row { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 8px; }
-      .badge { display: inline-flex; align-items: center; gap: 3px; padding: 2px 8px; border-radius: 12px; font-size: 11px; font-weight: 500; }
+      .badge {
+        display: inline-flex; align-items: center; gap: 3px;
+        padding: 2px 8px; border-radius: 12px; font-size: 11px; font-weight: 500;
+      }
       .badge ha-icon { --mdc-icon-size: 12px; }
       .bdg-lock   { background: rgba(219,68,55,.12);  color: var(--error-color, #db4437); }
       .bdg-sleep  { background: rgba(103,58,183,.12); color: #7b5ea7; }
       .bdg-school { background: rgba(33,150,243,.12); color: var(--primary-color, #2196f3); }
       .bdg-limit  { background: rgba(255,152,0,.12);  color: var(--warning-color, #ff9800); }
       .bdg-bonus  { background: rgba(76,175,80,.12);  color: #4caf50; }
+
+      /* Device progress bar */
       .time-bar-row { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
       .time-stat { text-align: center; flex-shrink: 0; min-width: 52px; }
       .time-stat.right { text-align: right; }
       .time-val { display: block; font-size: 13px; font-weight: 600; color: var(--primary-text-color); }
       .time-lbl { display: block; font-size: 9px; color: var(--secondary-text-color); text-transform: uppercase; }
-      .progress-bar { flex: 1; height: 6px; background: var(--divider-color, rgba(0,0,0,.12)); border-radius: 3px; overflow: hidden; }
+      .progress-bar {
+        flex: 1; height: 6px; background: var(--divider-color, rgba(0,0,0,.12));
+        border-radius: 3px; overflow: hidden;
+      }
       .progress-fill { height: 100%; border-radius: 3px; transition: width .3s ease; }
-      .time-limit-row { display: flex; align-items: center; gap: 4px; font-size: 11px; color: var(--secondary-text-color); margin-bottom: 8px; }
+      .time-limit-row {
+        display: flex; align-items: center; gap: 4px;
+        font-size: 11px; color: var(--secondary-text-color); margin-bottom: 8px;
+      }
       .icon-sm { --mdc-icon-size: 13px; opacity: .7; }
+
+      /* Bonus buttons */
       .bonus-row { display: flex; align-items: center; flex-wrap: wrap; gap: 5px; margin-top: 4px; }
       .bonus-lbl { font-size: 11px; color: var(--secondary-text-color); }
-      .chip-btn { padding: 3px 10px; border: none; border-radius: 14px; background: var(--primary-color); color: #fff; font-size: 12px; font-weight: 500; cursor: pointer; display: inline-flex; align-items: center; gap: 3px; font-family: inherit; transition: opacity .15s; }
+      .chip-btn {
+        padding: 3px 10px; border: none; border-radius: 14px;
+        background: var(--primary-color); color: #fff;
+        font-size: 12px; font-weight: 500; cursor: pointer;
+        display: inline-flex; align-items: center; gap: 3px;
+        font-family: inherit; transition: opacity .15s;
+      }
       .chip-btn:hover { opacity: .82; }
       .chip-btn ha-icon { --mdc-icon-size: 14px; }
       .chip-danger { background: var(--error-color, #db4437); }
+
+      /* App usage */
       .app-item { display: flex; align-items: center; gap: 10px; padding: 4px 0; }
       .app-icon { --mdc-icon-size: 20px; flex-shrink: 0; color: var(--secondary-text-color); }
-      .app-name { font-size: 13px; color: var(--primary-text-color); width: 110px; flex-shrink: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-      .app-bar { flex: 1; height: 6px; background: var(--divider-color, rgba(0,0,0,.1)); border-radius: 3px; overflow: hidden; }
+      .app-name {
+        font-size: 13px; color: var(--primary-text-color);
+        width: 110px; flex-shrink: 0;
+        overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+      }
+      .app-bar {
+        flex: 1; height: 6px; background: var(--divider-color, rgba(0,0,0,.1));
+        border-radius: 3px; overflow: hidden;
+      }
       .app-fill { height: 100%; background: var(--primary-color); border-radius: 3px; }
       .app-time { font-size: 11px; color: var(--secondary-text-color); width: 40px; text-align: right; flex-shrink: 0; }
-      .schedule-item { display: flex; align-items: center; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--divider-color, rgba(0,0,0,.07)); }
+
+      /* Schedules */
+      .schedule-item {
+        display: flex; align-items: center; gap: 10px; padding: 8px 0;
+        border-bottom: 1px solid var(--divider-color, rgba(0,0,0,.07));
+      }
       .schedule-item:last-child { border-bottom: none; padding-bottom: 0; }
       .sched-icon { color: var(--secondary-text-color); }
       .sched-icon.s-active { color: var(--primary-color); }
@@ -342,15 +439,22 @@ class GoogleFamilyLinkCard extends HTMLElement {
       .sched-badge { font-size: 11px; padding: 2px 8px; border-radius: 10px; font-weight: 500; flex-shrink: 0; }
       .s-on  { background: rgba(76,175,80,.14); color: #4caf50; }
       .s-off { background: var(--divider-color, rgba(0,0,0,.07)); color: var(--secondary-text-color); }
-      .toggle-btn { background: none; border: none; padding: 4px; cursor: pointer; border-radius: 4px; display: flex; align-items: center; --mdc-icon-size: 24px; color: var(--secondary-text-color); transition: background .15s; }
+      .toggle-btn {
+        background: none; border: none; padding: 4px; cursor: pointer;
+        border-radius: 4px; display: flex; align-items: center;
+        --mdc-icon-size: 24px; color: var(--secondary-text-color); transition: background .15s;
+      }
       .toggle-btn:hover { background: var(--divider-color, rgba(0,0,0,.1)); }
       .t-on  { color: var(--primary-color); }
       .t-off { color: var(--disabled-text-color, #9e9e9e); }
     `;
   }
 
+  // ── Main render ─────────────────────────────────────────────────────────────
+
   private _render(): void {
     if (!this._config || !this.shadowRoot) return;
+
     const t        = this._t();
     const cfg      = this._config;
     const name     = escapeHtml(this._childName());
@@ -358,10 +462,13 @@ class GoogleFamilyLinkCard extends HTMLElement {
     const used     = this._usedToday();
     const apps     = this._topApps();
     const maxMins  = apps.length > 0 ? Math.max(...apps.map((a) => a.minutes)) : 1;
+
+    // Count devices with an active daily limit for the subtitle
     const limitedDevices = cfg.devices.filter((d) => {
       const e = this._e(`sensor.${this._dp(d)}_screen_time_remaining`);
       return e?.attributes?.daily_limit_enabled !== false && parseFloat(e?.attributes?.total_allowed_minutes as string) > 0;
     });
+
     const devicesHtml = cfg.devices.length > 0 ? `
       <div class="section">
         <div class="section-head">
@@ -370,6 +477,7 @@ class GoogleFamilyLinkCard extends HTMLElement {
         </div>
         ${cfg.devices.map((d) => this._deviceCardHtml(d)).join("")}
       </div>` : "";
+
     const appsHtml = cfg.show_apps && apps.length > 0 ? `
       <div class="section">
         <div class="section-head toggleable" id="apps-toggle">
@@ -389,6 +497,7 @@ class GoogleFamilyLinkCard extends HTMLElement {
             </div>`).join("")}
         </div>` : ""}
       </div>` : "";
+
     const schedBody   = cfg.show_schedules ? this._schedulesHtml() : "";
     const schedulesHtml = schedBody ? `
       <div class="section">
@@ -398,6 +507,7 @@ class GoogleFamilyLinkCard extends HTMLElement {
         </div>
         ${schedBody}
       </div>` : "";
+
     this.shadowRoot.innerHTML = `
       <style>${this._styles()}</style>
       <ha-card>
@@ -406,6 +516,7 @@ class GoogleFamilyLinkCard extends HTMLElement {
           <span class="child-name">${name}</span>
           <ha-icon icon="mdi:account-child" class="header-icon"></ha-icon>
         </div>
+
         <div class="st-section">
           <div class="time-bubble">
             <span class="bubble-time">${minutesToDisplay(used, t)}</span>
@@ -418,26 +529,32 @@ class GoogleFamilyLinkCard extends HTMLElement {
               : `<div class="st-subtitle">${t.no_limit}</div>`}
           </div>
         </div>
+
         ${devicesHtml}
         ${appsHtml}
         ${schedulesHtml}
       </ha-card>`;
+
     this._attachListeners();
   }
 
   private _attachListeners(): void {
     const root = this.shadowRoot!;
+
     root.getElementById("apps-toggle")?.addEventListener("click", () => {
       this._appsOpen = !this._appsOpen;
       this._render();
     });
+
     root.querySelectorAll<HTMLElement>("[data-action='bonus']").forEach((btn) => {
       btn.addEventListener("click", () => {
         const dp      = btn.dataset.dp!;
         const minutes = btn.dataset.minutes!;
+        // HAFamilyLink button naming: button.<device>_<minutes>min (no "bonus_" prefix)
         this._hass?.callService("button", "press", { entity_id: `button.${dp}_${minutes}min` });
       });
     });
+
     root.querySelectorAll<HTMLElement>("[data-action='toggle-lock']").forEach((btn) => {
       btn.addEventListener("click", () => {
         const dp  = btn.dataset.dp!;
@@ -446,11 +563,13 @@ class GoogleFamilyLinkCard extends HTMLElement {
         this._hass?.callService("switch", svc, { entity_id: eid });
       });
     });
+
     root.querySelectorAll<HTMLElement>("[data-action='reset-bonus']").forEach((btn) => {
       btn.addEventListener("click", () => {
         this._hass?.callService("button", "press", { entity_id: `button.${btn.dataset.dp!}_reset_bonus` });
       });
     });
+
     root.querySelectorAll<HTMLElement>("[data-action='toggle-switch']").forEach((btn) => {
       btn.addEventListener("click", () => {
         const eid = btn.dataset.entity!;
