@@ -3,7 +3,7 @@ import { getTranslations, type Translations } from "./translations";
 import { minutesToDisplay, formatTime, escapeHtml, slugToName, packageToMdiIcon } from "./utils";
 import { GoogleFamilyLinkCardEditor } from "./editor";
 
-const CARD_VERSION = "1.3.1";
+const CARD_VERSION = "1.3.2";
 
 class GoogleFamilyLinkCard extends HTMLElement {
   private _hass: HomeAssistant | null = null;
@@ -102,6 +102,26 @@ class GoogleFamilyLinkCard extends HTMLElement {
     if (!e) return 0;
     const n = parseFloat(e.state);
     return isNaN(n) ? 0 : n;
+  }
+
+  /**
+   * Bubble content for the screen-time circle. Splits into two centered,
+   * non-wrapping lines ("1 Std" / "58 Min") once the total reaches an hour,
+   * so the text can never break mid-phrase (e.g. "...58" / "Min") and spill
+   * outside the circle — it always stays centered regardless of length.
+   */
+  private _bubbleContentHtml(minutes: number, t: Translations): string {
+    const total = Math.max(0, Math.round(minutes));
+    const h = Math.floor(total / 60);
+    const m = total % 60;
+    if (h > 0) {
+      const isDe = t.min === "Min";
+      const hLbl = isDe ? "Std" : "h";
+      const mLbl = isDe ? "Min" : "m";
+      return `<span class="bubble-time">${h} ${hLbl}</span>
+              <span class="bubble-time bubble-time-sub">${m} ${mLbl}</span>`;
+    }
+    return `<span class="bubble-time">${minutesToDisplay(minutes, t)}</span>`;
   }
 
   /**
@@ -321,11 +341,16 @@ class GoogleFamilyLinkCard extends HTMLElement {
         background: rgba(var(--rgb-primary-color, 3,169,244), .08);
         border: 3px solid var(--primary-color, #03a9f4);
         display: flex; flex-direction: column; align-items: center; justify-content: center;
-        gap: 1px;
+        gap: 1px; padding: 4px; box-sizing: border-box;
       }
       .bubble-time {
-        font-size: 18px; font-weight: 700; line-height: 1.1;
+        display: block;
+        font-size: 18px; font-weight: 700; line-height: 1.15;
         color: var(--primary-text-color);
+        text-align: center; white-space: nowrap;
+      }
+      .bubble-time-sub {
+        font-size: 14px;
       }
       .bubble-lbl {
         font-size: 9px; text-transform: uppercase; letter-spacing: .5px;
@@ -519,7 +544,7 @@ class GoogleFamilyLinkCard extends HTMLElement {
 
         <div class="st-section">
           <div class="time-bubble">
-            <span class="bubble-time">${minutesToDisplay(used, t)}</span>
+            ${this._bubbleContentHtml(used, t)}
             <span class="bubble-lbl">${t.today}</span>
           </div>
           <div class="st-meta">
