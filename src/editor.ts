@@ -259,6 +259,10 @@ export class GoogleFamilyLinkCardEditor extends HTMLElement {
           <input type="number" id="max_apps" value="${cfg?.max_apps ?? 5}" min="1" max="10" />
         </div>
         <div class="toggle-row">
+          <input type="checkbox" id="show_devices" ${cfg?.show_devices !== false ? "checked" : ""} />
+          <span class="toggle-lbl">Show Devices section (add extra time)</span>
+        </div>
+        <div class="toggle-row">
           <input type="checkbox" id="show_apps" ${cfg?.show_apps !== false ? "checked" : ""} />
           <span class="toggle-lbl">Show App Usage section</span>
         </div>
@@ -284,7 +288,7 @@ export class GoogleFamilyLinkCardEditor extends HTMLElement {
         this._fireChange();
       });
     });
-    ["name", "max_apps", "show_apps", "show_schedules"].forEach((id) => {
+    ["name", "max_apps", "show_devices", "show_apps", "show_schedules"].forEach((id) => {
       const el = root.getElementById(id);
       if (!el) return;
       el.addEventListener("change", () => this._fireChange());
@@ -307,12 +311,14 @@ export class GoogleFamilyLinkCardEditor extends HTMLElement {
     const devices = Array.from(root.querySelectorAll<HTMLInputElement>(".device-cb:checked")).map((cb) => cb.value);
     const name    = (root.getElementById("name")    as HTMLInputElement | null)?.value.trim() ?? "";
     const maxApps = parseInt((root.getElementById("max_apps") as HTMLInputElement | null)?.value ?? "5", 10) || 5;
+    const showDevices   = (root.getElementById("show_devices")   as HTMLInputElement | null)?.checked ?? true;
     const showApps      = (root.getElementById("show_apps")      as HTMLInputElement | null)?.checked ?? true;
     const showSchedules = (root.getElementById("show_schedules") as HTMLInputElement | null)?.checked ?? true;
 
     const config: FamilyLinkCardConfig = {
       ...this._config, child, devices,
       max_apps: Math.min(10, Math.max(1, maxApps)),
+      show_devices: showDevices,
       show_apps: showApps,
       show_schedules: showSchedules,
     };
