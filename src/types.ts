@@ -2,6 +2,7 @@ export interface FamilyLinkCardConfig {
   type: string;
   child: string;
   devices?: string[];
+  show_devices?: boolean;
   show_apps?: boolean;
   max_apps?: number;
   show_schedules?: boolean;
