@@ -29,6 +29,7 @@ class GoogleFamilyLinkCard extends HTMLElement {
       type: config.type,
       child: config.child,
       devices: config.devices ?? [],
+      show_devices: config.show_devices !== false,
       show_apps: config.show_apps !== false,
       max_apps: Math.min(10, Math.max(1, config.max_apps ?? 5)),
       show_schedules: config.show_schedules !== false,
@@ -102,26 +103,6 @@ class GoogleFamilyLinkCard extends HTMLElement {
     if (!e) return 0;
     const n = parseFloat(e.state);
     return isNaN(n) ? 0 : n;
-  }
-
-  /**
-   * Bubble content for the screen-time circle. Splits into two centered,
-   * non-wrapping lines ("1 Std" / "58 Min") once the total reaches an hour,
-   * so the text can never break mid-phrase (e.g. "...58" / "Min") and spill
-   * outside the circle — it always stays centered regardless of length.
-   */
-  private _bubbleContentHtml(minutes: number, t: Translations): string {
-    const total = Math.max(0, Math.round(minutes));
-    const h = Math.floor(total / 60);
-    const m = total % 60;
-    if (h > 0) {
-      const isDe = t.min === "Min";
-      const hLbl = isDe ? "Std" : "h";
-      const mLbl = isDe ? "Min" : "m";
-      return `<span class="bubble-time">${h} ${hLbl}</span>
-              <span class="bubble-time bubble-time-sub">${m} ${mLbl}</span>`;
-    }
-    return `<span class="bubble-time">${minutesToDisplay(minutes, t)}</span>`;
   }
 
   /**
@@ -341,16 +322,11 @@ class GoogleFamilyLinkCard extends HTMLElement {
         background: rgba(var(--rgb-primary-color, 3,169,244), .08);
         border: 3px solid var(--primary-color, #03a9f4);
         display: flex; flex-direction: column; align-items: center; justify-content: center;
-        gap: 1px; padding: 4px; box-sizing: border-box;
+        gap: 1px;
       }
       .bubble-time {
-        display: block;
-        font-size: 18px; font-weight: 700; line-height: 1.15;
+        font-size: 18px; font-weight: 700; line-height: 1.1;
         color: var(--primary-text-color);
-        text-align: center; white-space: nowrap;
-      }
-      .bubble-time-sub {
-        font-size: 14px;
       }
       .bubble-lbl {
         font-size: 9px; text-transform: uppercase; letter-spacing: .5px;
@@ -494,7 +470,7 @@ class GoogleFamilyLinkCard extends HTMLElement {
       return e?.attributes?.daily_limit_enabled !== false && parseFloat(e?.attributes?.total_allowed_minutes as string) > 0;
     });
 
-    const devicesHtml = cfg.devices.length > 0 ? `
+    const devicesHtml = cfg.show_devices && cfg.devices.length > 0 ? `
       <div class="section">
         <div class="section-head">
           <ha-icon icon="mdi:devices"></ha-icon>
@@ -544,7 +520,7 @@ class GoogleFamilyLinkCard extends HTMLElement {
 
         <div class="st-section">
           <div class="time-bubble">
-            ${this._bubbleContentHtml(used, t)}
+            <span class="bubble-time">${minutesToDisplay(used, t)}</span>
             <span class="bubble-lbl">${t.today}</span>
           </div>
           <div class="st-meta">
